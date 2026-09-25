@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Reversi Workshop</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel controls">
+        <h1>Reversi Workshop Server</h1>
+        <p class="lede">Create a local game, play in the browser, or point a side at a remote HTTP bot.</p>
+        <p>
+          External bot documentation:
+          <a href="{{ url_for('swagger_ui') }}">Swagger / OpenAPI</a>
+          ·
+          <a href="{{ url_for('bot_instructions') }}">Bot instructions</a>
+        </p>
+
+        <form id="new-game-form" class="stack">
+          <div class="player-grid">
+            <fieldset>
+              <legend>Black</legend>
+              <label>
+                Type
+                <select name="black-type" id="black-type">
+                  <option value="human">Human</option>
+                  <option value="random">Random bot</option>
+                  <option value="greedy" selected>Greedy bot</option>
+                  <option value="remote">Remote bot</option>
+                </select>
+              </label>
+              <label class="remote-url hidden" data-target="black">
+                Remote URL
+                <input type="url" id="black-url" placeholder="http://localhost:9001">
+              </label>
+            </fieldset>
+
+            <fieldset>
+              <legend>White</legend>
+              <label>
+                Type
+                <select name="white-type" id="white-type">
+                  <option value="human">Human</option>
+                  <option value="random">Random bot</option>
+                  <option value="greedy" selected>Greedy bot</option>
+                  <option value="remote">Remote bot</option>
+                </select>
+              </label>
+              <label class="remote-url hidden" data-target="white">
+                Remote URL
+                <input type="url" id="white-url" placeholder="http://localhost:9002">
+              </label>
+            </fieldset>
+          </div>
+
+          <div class="actions">
+            <button type="submit">Create game</button>
+            <button type="button" id="refresh-games">Refresh games</button>
+          </div>
+        </form>
+
+        <div id="message" class="message" aria-live="polite"></div>
+
+        <section class="stack">
+          <div class="section-heading">
+            <h2>Tournament Mode</h2>
+            <p class="section-copy">Workshop bots register with the server, appear below, and only play tournament moves after the operator starts.</p>
+          </div>
+          <div class="actions tournament-actions">
+            <label class="inline-control" for="tournament-format">
+              Format
+              <select id="tournament-format" name="tournament-format">
+                <option value="double_round_robin" selected>Double round robin</option>
+                <option value="single_round_robin">Single round robin</option>
+                <option value="single_elimination">Single elimination playoff</option>
+              </select>
+            </label>
+            <button type="button" id="start-tournament">Start tournament with connected bots</button>
+            <button type="button" id="refresh-tournament">Refresh tournament</button>
+          </div>
+          <section class="summary-card stack compact-form">
+            <div class="section-heading">
+              <h3>External bot poll rate</h3>
+              <p class="section-copy">
+                Set the minimum time between authenticated bot requests. Changes apply immediately, even during a running tournament.
+              </p>
+            </div>
+            <div class="poll-rate-controls">
+              <label class="poll-rate-slider-label" for="poll-rate-slider">
+                Slider
+                <input
+                  type="range"
+                  id="poll-rate-slider"
+                  min="25"
+                  max="2000"
+                  step="1"
+                  value="{{ external_bot_request_interval_ms }}"
+                >
+              </label>
+              <label class="poll-rate-exact-label" for="poll-rate-input">
+                Exact value (ms)
+                <input
+                  type="number"
+                  id="poll-rate-input"
+                  min="25"
+                  max="2000"
+                  step="1"
+                  value="{{ external_bot_request_interval_ms }}"
+                >
+              </label>
+              <div class="poll-rate-actions">
+                <button type="button" id="save-poll-rate" class="secondary-button" disabled>Apply poll rate</button>
+                <button type="button" id="reset-poll-rate" class="secondary-button" disabled>Reset</button>
+              </div>
+            </div>
+            <p id="poll-rate-status" class="poll-rate-status" aria-live="polite">
+              Active limit: <strong id="poll-rate-active">{{ external_bot_request_interval_ms }} ms</strong>
+              <span id="poll-rate-pending" class="poll-rate-pending hidden"></span>
+            </p>
+            <p id="poll-rate-hint" class="section-copy">
+              Default: 250 ms. External bots should follow <code>Retry-After</code> if this rate changes and they receive <code>429 Too Many Requests</code>.
+            </p>
+          </section>
+          <form id="spawn-bots-form" class="stack compact-form">
+            <div class="player-grid compact-grid">
+              <label>
+                Bot name / prefix
+                <input type="text" id="spawn-name-prefix" value="local-bot" maxlength="40">
+              </label>
+              <label>
+                Count
+                <input type="number" id="spawn-count" min="1" max="32" value="1">
+              </label>
+            </div>
+            <div class="actions">
+              <button type="submit" id="spawn-bots">Spawn local tournament bots</button>
+            </div>
+          </form>
+          <section>
+            <h3>Connected bots</h3>
+            <ul id="bot-list" class="plain-list"></ul>
+          </section>
+          <section>
+            <h3>Latest tournament</h3>
+            <div id="tournament-summary" class="summary-card">No tournament started yet.</div>
+            <div class="details-grid tournament-grid">
+              <section>
+                <h4>Standings</h4>
+                <ol id="tournament-standings" class="plain-list standings-list"></ol>
+              </section>
+              <section>
+                <h4>Matches</h4>
+                <ol id="tournament-matches" class="plain-list"></ol>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <section>
+          <h2>Active / Recent Games</h2>
+          <ul id="games-list" class="games-list"></ul>
+        </section>
+      </section>
+
+      <section class="panel board-panel">
+        <div class="status-bar">
+          <div>
+            <h2 id="game-title">No game selected</h2>
+            <p id="game-subtitle">Create a game to begin.</p>
+          </div>
+          <div class="score-box">
+            <span>Black: <strong id="score-black">2</strong></span>
+            <span>White: <strong id="score-white">2</strong></span>
+          </div>
+        </div>
+
+        <div
+          id="board-empty-state"
+          class="board-empty-state"
+          role="status"
+          aria-live="polite"
+        >
+          No game selected yet. Create a game or click a tournament board to show it here.
+        </div>
+
+        <div id="board" class="board hidden" role="grid" aria-label="Reversi board"></div>
+
+        <section class="stack tournament-focus-panel">
+          <div class="focus-toolbar">
+            <div>
+              <h3>Tournament boards</h3>
+              <p id="focus-caption" class="section-copy">Tournament boards will appear here. Click one to focus it above.</p>
+            </div>
+            <button type="button" id="clear-focus" class="secondary-button hidden">Clear focus</button>
+          </div>
+          <div id="tournament-boards" class="tournament-boards">No tournament games are running.</div>
+        </section>
+
+        <div class="details-grid">
+          <section>
+            <h3>Status</h3>
+            <dl class="status-list">
+              <div><dt>Turn</dt><dd id="current-player">-</dd></div>
+              <div><dt>State</dt><dd id="game-status">-</dd></div>
+              <div><dt>Winner</dt><dd id="game-winner">-</dd></div>
+            </dl>
+          </section>
+
+          <section>
+            <h3>Recent Moves</h3>
+            <ol id="history" class="history"></ol>
+          </section>
+        </div>
+
+        <section id="playoff-bracket-panel" class="stack bracket-panel hidden">
+          <div class="section-heading">
+            <h3>Playoff bracket</h3>
+            <p id="playoff-winner" class="section-copy">Winner will appear here when the final is decided.</p>
+          </div>
+          <div id="playoff-bracket" class="playoff-bracket"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  </body>
+</html>
+

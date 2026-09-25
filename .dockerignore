@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.iml
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+tests/
+reversi_workshop.egg-info/
+.idea/

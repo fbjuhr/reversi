@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Reversi Bot Instructions</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f6fb;
+        --card: #ffffff;
+        --text: #142235;
+        --muted: #4b5a6c;
+        --accent: #1d6fd6;
+        --border: #dbe3ef;
+        --code: #10263f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 1.5rem;
+      }
+
+      .hero,
+      section {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 1.25rem 1.4rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 8px 30px rgba(16, 38, 63, 0.05);
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin-top: 0;
+      }
+
+      .hero p,
+      li,
+      td,
+      th {
+        color: var(--muted);
+      }
+
+      .callout {
+        border-left: 4px solid var(--accent);
+        background: #eef5ff;
+        padding: 0.9rem 1rem;
+        border-radius: 10px;
+        color: var(--text);
+      }
+
+      .grid {
+        display: grid;
+        gap: 1rem;
+      }
+
+      @media (min-width: 900px) {
+        .grid.two {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      }
+
+      code {
+        background: #eef3fb;
+        padding: 0.12rem 0.32rem;
+        border-radius: 6px;
+        color: var(--code);
+      }
+
+      pre {
+        margin: 0;
+        overflow-x: auto;
+        background: #0f2136;
+        color: #f5f8ff;
+        padding: 1rem;
+        border-radius: 12px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        padding: 0.7rem 0.55rem;
+        vertical-align: top;
+      }
+
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <h1>External Reversi bot instructions</h1>
+        <p>
+          This page describes the external APIs that workshop bots use. These docs are intentionally reachable from external IPs whenever the server itself is
+          started on a network-visible host such as <code>0.0.0.0</code>.
+        </p>
+        <div class="callout">
+          To expose the docs and bot endpoints on your network, start the server with a public bind address, for example
+          <code>python -m reversi --host 0.0.0.0 --port 8000</code>, then visit <code>{{ server_base_url }}/swagger</code> or <code>{{ server_base_url }}/instructions</code>.
+        </div>
+        <p>
+          Swagger: <a href="{{ url_for('swagger_ui') }}">{{ url_for('swagger_ui', _external=True) }}</a><br>
+          OpenAPI JSON: <a href="{{ url_for('openapi_spec') }}">{{ url_for('openapi_spec', _external=True) }}</a>
+        </p>
+      </section>
+
+      <section>
+        <h2>Bot lifecycle</h2>
+        <ol>
+          <li>Register exactly once with <code>POST /api/tournament/bots/register</code>.</li>
+          <li>Store the returned <code>bot_id</code> and <code>secret</code>.</li>
+          <li>Keep one bot process running and poll <code>GET /api/tournament/bots/&lt;bot_id&gt;/assignment?secret=&lt;secret&gt;</code>.</li>
+          <li>Make sure every authenticated bot request is at least <code>{{ "%.2f"|format(external_bot_request_interval_seconds) }} seconds</code> after the previous one.</li>
+          <li>Expect the operator to change that minimum during a tournament and adapt without restarting the bot.</li>
+          <li>When <code>available</code> becomes <code>true</code>, pick one move from <code>legal_moves</code>.</li>
+          <li>Submit that move to <code>POST /api/tournament/matches/&lt;game_id&gt;/move</code>.</li>
+          <li>Repeat until the tournament finishes.</li>
+        </ol>
+      </section>
+
+      <section class="grid two">
+        <div>
+          <h2>How often to connect</h2>
+          <ul>
+            <li>Register once when your bot starts.</li>
+            <li>After that, reuse the same base server URL and poll the assignment endpoint repeatedly.</li>
+            <li>The server enforces a hard minimum of <strong>{{ "%.2f"|format(external_bot_request_interval_seconds) }} seconds</strong> between authenticated requests for the same bot.</li>
+            <li>The operator can change that rate during a tournament from the browser UI, so bots should treat the current limit as dynamic rather than hard-coded.</li>
+            <li>A practical poll interval is about <strong>{{ "%.2f"|format(recommended_poll_interval_seconds) }} seconds</strong> between assignment checks.</li>
+            <li>That limit is shared across assignment polling and move submission, so a successful poll may need a brief pause before the next move request.</li>
+            <li>The server does not push turns over WebSockets; polling is the expected integration model.</li>
+          </ul>
+        </div>
+        <div>
+          <h2>Timeouts and forfeits</h2>
+          <ul>
+            <li>When a match activates your turn, act quickly.</li>
+            <li>If the current bot-controlled turn stays unresolved for more than <strong>{{ bot_turn_timeout_seconds }} seconds</strong>, the server records a forfeit.</li>
+            <li>The resulting termination reason is <code>bot_timeout_exceeded</code>.</li>
+            <li>Wrong secrets, out-of-turn submissions, or illegal moves are rejected immediately and do not count as valid moves.</li>
+            <li>If you send requests too quickly, the server replies with <code>429 Too Many Requests</code>, a <code>Retry-After</code> header, and a JSON <code>retry_after_seconds</code> value.</li>
+            <li>Robust bots should watch the <code>limit_seconds</code> field on successful responses and always honor <code>Retry-After</code> after a 429 so they do not overload the server after a live rate change.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section>
+        <h2>Register a bot</h2>
+        <p>Send a unique bot name to the registration endpoint:</p>
+        <pre>{
+  "name": "alpha"
+}</pre>
+        <p>Example request:</p>
+        <pre>POST {{ server_base_url }}/api/tournament/bots/register
+Content-Type: application/json</pre>
+        <p>Example response:</p>
+        <pre>{
+  "bot_id": "2bca0f14",
+  "name": "alpha",
+  "secret": "generated-secret",
+  "created_at": "2026-09-25T12:00:00+00:00",
+  "last_seen_at": "2026-09-25T12:00:00+00:00",
+  "status": "connected",
+  "managed": false,
+  "process_alive": false,
+  "pid": null
+}</pre>
+        <p>If another bot already uses the same name, registration is rejected.</p>
+      </section>
+
+      <section>
+        <h2>Assignment payload and game data format</h2>
+        <p>
+          When it is your turn, the assignment endpoint returns <code>available: true</code>, the current <code>game_id</code>, your color in <code>you_are</code>, and a full game
+          snapshot in <code>state</code>.
+        </p>
+        <pre>{
+  "bot": {
+    "bot_id": "2bca0f14",
+    "name": "alpha",
+    "created_at": "2026-09-25T12:00:00+00:00",
+    "last_seen_at": "2026-09-25T12:00:05+00:00",
+    "status": "connected"
+  },
+  "available": true,
+  "limit_seconds": {{ "%.2f"|format(external_bot_request_interval_seconds) }},
+  "tournament_id": "tour1234",
+  "game_id": "abc12345",
+  "you_are": "B",
+  "opponent": {
+    "bot_id": "7f31c8aa",
+    "name": "beta"
+  },
+  "state": {
+    "game_id": "abc12345",
+    "board": [
+      [".", ".", ".", ".", ".", ".", ".", "."],
+      [".", ".", ".", ".", ".", ".", ".", "."],
+      [".", ".", ".", ".", ".", ".", ".", "."],
+      [".", ".", ".", "W", "B", ".", ".", "."],
+      [".", ".", ".", "B", "W", ".", ".", "."],
+      [".", ".", ".", ".", ".", ".", ".", "."],
+      [".", ".", ".", ".", ".", ".", ".", "."],
+      [".", ".", ".", ".", ".", ".", ".", "."]
+    ],
+    "current_player": "B",
+    "status": "active",
+    "winner": null,
+    "termination_reason": null,
+    "scores": {
+      "black": 2,
+      "white": 2
+    },
+    "legal_moves": [
+      {"row": 2, "col": 3},
+      {"row": 3, "col": 2},
+      {"row": 4, "col": 5},
+      {"row": 5, "col": 4}
+    ],
+    "move_count": 0,
+    "history": [],
+    "created_at": "2026-09-25T12:00:00+00:00",
+    "updated_at": "2026-09-25T12:00:00+00:00",
+    "players": {
+      "black": {"type": "tournament_bot", "bot_id": "2bca0f14", "bot_name": "alpha"},
+      "white": {"type": "tournament_bot", "bot_id": "7f31c8aa", "bot_name": "beta"}
+    },
+    "metadata": {
+      "mode": "tournament",
+      "tournament_id": "tour1234",
+      "match_index": 1,
+      "black_bot_id": "2bca0f14",
+      "white_bot_id": "7f31c8aa",
+      "black_bot_name": "alpha",
+      "white_bot_name": "beta"
+    }
+  },
+  "legal_moves": [
+    {"row": 2, "col": 3},
+    {"row": 3, "col": 2},
+    {"row": 4, "col": 5},
+    {"row": 5, "col": 4}
+  ]
+}</pre>
+      </section>
+
+      <section>
+        <h2>Field reference</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>board</code></td>
+              <td>8x8 array. <code>.</code> means empty, <code>B</code> black, <code>W</code> white.</td>
+            </tr>
+            <tr>
+              <td><code>current_player</code></td>
+              <td>Whose turn it is right now: <code>B</code> or <code>W</code>.</td>
+            </tr>
+            <tr>
+              <td><code>legal_moves</code></td>
+              <td>All legal moves for the current player. Your submitted move must come from this list.</td>
+            </tr>
+            <tr>
+              <td><code>scores</code></td>
+              <td>Current piece counts: <code>black</code> and <code>white</code>.</td>
+            </tr>
+            <tr>
+              <td><code>history</code></td>
+              <td>Ordered list of past moves, passes, or forfeits.</td>
+            </tr>
+            <tr>
+              <td><code>metadata</code></td>
+              <td>Tournament-specific data including bot ids, names, and match index.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="grid two">
+        <div>
+          <h2>Submit a move</h2>
+          <p>Send one legal move back to the match endpoint:</p>
+          <pre>{
+  "bot_id": "2bca0f14",
+  "secret": "generated-secret",
+  "row": 2,
+  "col": 3
+}</pre>
+          <p>The <code>row</code> and <code>col</code> values are zero-based indexes.</p>
+        </div>
+        <div>
+          <h2>Tournament formats</h2>
+          <ul>
+            {% for format_name in supported_formats %}
+            <li><code>{{ format_name }}</code></li>
+            {% endfor %}
+          </ul>
+          <p>The operator chooses the tournament format when starting the tournament.</p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
+

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reversi-workshop"
+version = "0.1.0"
+description = "Minimal Reversi/Othello server with web UI and bot API for workshops"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "Flask>=3.0,<4.0",
+    "waitress>=3.0,<4.0",
+]
+
+[project.scripts]
+reversi-web = "reversi.__main__:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["reversi*"]
+
+[tool.setuptools.package-data]
+reversi = ["web/templates/*.html", "web/static/*.js", "web/static/*.css"]
+

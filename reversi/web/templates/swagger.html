@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Reversi Bot API Swagger</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+    <style>
+      body {
+        margin: 0;
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f5f7fb;
+        color: #132033;
+      }
+
+      .hero {
+        padding: 1.25rem 1.5rem;
+        background: linear-gradient(135deg, #10263f, #1d4f73);
+        color: #fff;
+      }
+
+      .hero h1 {
+        margin: 0 0 0.5rem;
+        font-size: 1.8rem;
+      }
+
+      .hero p {
+        margin: 0.35rem 0;
+        max-width: 70rem;
+        line-height: 1.5;
+      }
+
+      .hero a {
+        color: #cfe8ff;
+      }
+
+      #swagger-ui {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="hero">
+      <h1>Reversi Workshop Bot API</h1>
+      <p>
+        Use this Swagger UI for the external tournament bot endpoints. Bots typically register once, then poll for assignments roughly every
+        <strong>{{ "%.2f"|format(recommended_poll_interval_seconds) }} seconds</strong>.
+      </p>
+      <p>
+        Each registered bot may send at most one authenticated request every
+        <strong>{{ "%.2f"|format(external_bot_request_interval_seconds) }} seconds</strong>. Faster requests are rejected with
+        <strong>429 Too Many Requests</strong>, a <code>Retry-After</code> header, and a JSON <code>retry_after_seconds</code> field.
+      </p>
+      <p>
+        The operator can change that limit mid-tournament from the browser UI. Bots should therefore treat the current rate as dynamic, keep an eye on
+        <code>limit_seconds</code>, and always honor <code>Retry-After</code> if they are throttled.
+      </p>
+      <p>
+        If a bot does not submit a move within <strong>{{ bot_turn_timeout_seconds }} seconds</strong> of its turn becoming active, the server forfeits that game.
+      </p>
+      <p>
+        Also available: <a href="{{ url_for('bot_instructions') }}">bot instructions</a> and the raw
+        <a href="{{ url_for('openapi_spec') }}">OpenAPI JSON</a>.
+      </p>
+    </section>
+
+    <div id="swagger-ui"></div>
+
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+    <script>
+      window.addEventListener("load", () => {
+        window.SwaggerUIBundle({
+          url: "{{ url_for('openapi_spec') }}",
+          dom_id: "#swagger-ui",
+          deepLinking: true,
+          displayRequestDuration: true,
+          tryItOutEnabled: false,
+          presets: [window.SwaggerUIBundle.presets.apis],
+        });
+      });
+    </script>
+  </body>
+</html>
+
