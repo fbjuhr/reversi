@@ -77,8 +77,13 @@
                 <option value="single_elimination">Single elimination playoff</option>
               </select>
             </label>
+            <label class="inline-control checkbox-control hidden" id="pause-between-rounds-control" for="pause-between-rounds">
+              <input type="checkbox" id="pause-between-rounds" name="pause-between-rounds">
+              Pause before each bracket round
+            </label>
             <button type="button" id="start-tournament">Start tournament with connected bots</button>
             <button type="button" id="refresh-tournament">Refresh tournament</button>
+            <button type="button" id="resume-tournament" class="hidden">Resume tournament</button>
           </div>
           <section class="summary-card stack compact-form">
             <div class="section-heading">
@@ -88,19 +93,8 @@
               </p>
             </div>
             <div class="poll-rate-controls">
-              <label class="poll-rate-slider-label" for="poll-rate-slider">
-                Slider
-                <input
-                  type="range"
-                  id="poll-rate-slider"
-                  min="25"
-                  max="2000"
-                  step="1"
-                  value="{{ external_bot_request_interval_ms }}"
-                >
-              </label>
               <label class="poll-rate-exact-label" for="poll-rate-input">
-                Exact value (ms)
+                Poll rate (ms)
                 <input
                   type="number"
                   id="poll-rate-input"
@@ -139,7 +133,7 @@
             </div>
           </form>
           <section>
-            <h3>Connected bots</h3>
+            <h3>Connected bots <span id="bot-count" class="bot-count">0 connected</span></h3>
             <ul id="bot-list" class="plain-list"></ul>
           </section>
           <section>

@@ -184,10 +184,11 @@ class AppTests(unittest.TestCase):
         response = self.operator_get("/")
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        self.assertIn("poll-rate-slider", html)
         self.assertIn("poll-rate-input", html)
         self.assertIn("save-poll-rate", html)
         self.assertIn('value="250"', html)
+        # The slider was removed; the number input is the only way to set the rate.
+        self.assertNotIn("poll-rate-slider", html)
 
     def test_index_poll_rate_controls_support_explicit_apply_and_reset(self) -> None:
         response = self.operator_get("/")

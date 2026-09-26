@@ -14,6 +14,7 @@ from .manager import GameManager, ManagedGame
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EXTERNAL_BOT_REQUEST_INTERVAL_SECONDS = 0.25
+BOT_STALE_AFTER_SECONDS = 5.0
 SUPPORTED_TOURNAMENT_FORMATS = (
     "double_round_robin",
     "single_round_robin",
@@ -43,12 +44,23 @@ class RegisteredBot:
     def touch(self) -> None:
         self.last_seen_at = datetime.now(UTC).isoformat()
 
+    def seconds_since_last_seen(self) -> float:
+        try:
+            last_seen = datetime.fromisoformat(self.last_seen_at)
+        except ValueError:
+            return 0.0
+        return max((datetime.now(UTC) - last_seen).total_seconds(), 0.0)
+
     def to_public_dict(self) -> dict[str, object]:
+        idle_seconds = self.seconds_since_last_seen()
         return {
             "bot_id": self.bot_id,
             "name": self.name,
             "created_at": self.created_at,
             "last_seen_at": self.last_seen_at,
+            "seconds_since_last_seen": round(idle_seconds, 3),
+            "stale": idle_seconds > BOT_STALE_AFTER_SECONDS,
+            "stale_after_seconds": BOT_STALE_AFTER_SECONDS,
             "status": self.status,
         }
 
@@ -71,6 +83,9 @@ class Tournament:
     finished_at: str | None = None
     format: str = "double_round_robin"
     match_plan: list[dict[str, object]] = field(default_factory=list)
+    pause_between_rounds: bool = False
+    released_round_index: int = 0
+    paused_before_round: int | None = None
 
 
 @dataclass
@@ -220,6 +235,7 @@ class TournamentManager:
         bot_ids: list[str] | None = None,
         tournament_format: str | None = None,
         double_round_robin: bool | None = None,
+        pause_between_rounds: bool = False,
     ) -> dict[str, object]:
         if self._running_tournament() is not None:
             raise RuntimeError("A tournament is already running.")
@@ -244,11 +260,13 @@ class TournamentManager:
             participants=participants,
             match_game_ids=[],
             format=format_name,
+            pause_between_rounds=bool(pause_between_rounds) and format_name == "single_elimination",
         )
 
         if format_name == "single_elimination":
             tournament.match_plan = self._build_single_elimination_plan(selected_ids)
             self._materialize_tournament_games(tournament)
+            self._update_round_pause(tournament)
         else:
             pairings = self._build_pairings(selected_ids, tournament_format=format_name)
             for index, (black_bot_id, white_bot_id) in enumerate(pairings, start=1):
@@ -290,11 +308,17 @@ class TournamentManager:
         active_game = self._active_game_for_bot(tournament, bot_id)
         if active_game is None:
             ongoing_matches = self._ongoing_managed_games(tournament)
+            paused_round = tournament.paused_before_round
+            message = (
+                f"Tournament paused before the {self._playoff_round_name(tournament, paused_round)}."
+                if paused_round is not None
+                else "Waiting for the next match slot."
+            )
             return {
                 "bot": bot.to_public_dict(),
                 "available": False,
                 "limit_seconds": self.external_bot_request_interval_seconds,
-                "message": "Waiting for the next match slot.",
+                "message": message,
                 "tournament": self._serialize_tournament(tournament),
                 "active_game_ids": [managed.game_id for managed in ongoing_matches],
             }
@@ -578,6 +602,8 @@ class TournamentManager:
             white_bot_id = self._resolve_match_source(tournament, plan_entry["white_source"])
             if black_bot_id is None or white_bot_id is None:
                 continue
+            if tournament.pause_between_rounds and int(plan_entry["round_index"]) > tournament.released_round_index:
+                continue
 
             managed = self._create_tournament_game(
                 tournament,
@@ -639,6 +665,30 @@ class TournamentManager:
             return "Quarterfinal"
         return f"Round {round_index}"
 
+    def _next_unplayed_round_index(self, tournament: Tournament) -> int | None:
+        """Lowest bracket round that still has an undecided match, or None when the bracket is complete."""
+        pending = [int(entry["round_index"]) for entry in tournament.match_plan if entry.get("winner_bot_id") is None]
+        return min(pending) if pending else None
+
+    def _update_round_pause(self, tournament: Tournament) -> None:
+        if tournament.format != "single_elimination" or not tournament.pause_between_rounds:
+            tournament.paused_before_round = None
+            return
+        next_round = self._next_unplayed_round_index(tournament)
+        if next_round is None or next_round <= tournament.released_round_index:
+            tournament.paused_before_round = None
+            return
+        tournament.paused_before_round = next_round
+
+    def resume_tournament(self, tournament_id: str) -> dict[str, object]:
+        tournament = self._lookup_tournament(tournament_id)
+        self._sync_tournament(tournament)
+        if tournament.paused_before_round is None:
+            raise RuntimeError("Tournament is not paused between bracket rounds.")
+        tournament.released_round_index = tournament.paused_before_round
+        self._sync_tournament(tournament)
+        return self._serialize_tournament(tournament)
+
     def _sync_tournament(self, tournament: Tournament) -> None:
         if tournament.status != "running":
             return
@@ -652,6 +702,7 @@ class TournamentManager:
             if self._game_manager.get_game(game_id).game.status == "active"
         ]
         self._materialize_tournament_games(tournament)
+        self._update_round_pause(tournament)
         self._schedule_games(tournament)
 
         tournament_finished = False
@@ -874,6 +925,7 @@ class TournamentManager:
                     "board": game_payload["board"],
                     "current_player": game_payload["current_player"],
                     "legal_moves": game_payload["legal_moves"],
+                    "last_move": game_payload["last_move"],
                     "black": {"bot_id": black_bot_id, "name": tournament.participants[black_bot_id]},
                     "white": {"bot_id": white_bot_id, "name": tournament.participants[white_bot_id]},
                 }
@@ -933,6 +985,9 @@ class TournamentManager:
                     "name": tournament.participants[bot_id],
                     "created_at": None,
                     "last_seen_at": None,
+                    "seconds_since_last_seen": None,
+                    "stale": True,
+                    "stale_after_seconds": BOT_STALE_AFTER_SECONDS,
                     "status": "removed",
                 }
                 for bot_id in tournament.bot_ids
@@ -945,6 +1000,14 @@ class TournamentManager:
             "matches": matches,
             "bracket": bracket,
             "champion": None if bracket is None else bracket["winner"],
+            "pause_between_rounds": tournament.pause_between_rounds,
+            "paused": tournament.paused_before_round is not None,
+            "paused_before_round_index": tournament.paused_before_round,
+            "paused_before_round_name": (
+                None
+                if tournament.paused_before_round is None
+                else self._playoff_round_name(tournament, tournament.paused_before_round)
+            ),
             "standings": ordered_standings,
         }
 

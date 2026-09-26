@@ -18,6 +18,7 @@ const boardElement = document.getElementById("board");
 const boardEmptyStateElement = document.getElementById("board-empty-state");
 const gamesListElement = document.getElementById("games-list");
 const botListElement = document.getElementById("bot-list");
+const botCountElement = document.getElementById("bot-count");
 const tournamentSummaryElement = document.getElementById("tournament-summary");
 const playoffBracketPanelElement = document.getElementById("playoff-bracket-panel");
 const playoffWinnerElement = document.getElementById("playoff-winner");
@@ -30,7 +31,9 @@ const focusCaptionElement = document.getElementById("focus-caption");
 const clearFocusButton = document.getElementById("clear-focus");
 const spawnBotsFormElement = document.getElementById("spawn-bots-form");
 const tournamentFormatElement = document.getElementById("tournament-format");
-const pollRateSliderElement = document.getElementById("poll-rate-slider");
+const pauseBetweenRoundsElement = document.getElementById("pause-between-rounds");
+const pauseBetweenRoundsControlElement = document.getElementById("pause-between-rounds-control");
+const resumeTournamentButton = document.getElementById("resume-tournament");
 const pollRateInputElement = document.getElementById("poll-rate-input");
 const pollRateHintElement = document.getElementById("poll-rate-hint");
 const pollRateActiveElement = document.getElementById("poll-rate-active");
@@ -127,20 +130,13 @@ function clampPollRateMs(valueMs) {
 }
 
 function isPollRateBeingEdited() {
-  return (
-    state.pollRateDirty ||
-    document.activeElement === pollRateSliderElement ||
-    document.activeElement === pollRateInputElement
-  );
+  return state.pollRateDirty || document.activeElement === pollRateInputElement;
 }
 
-// Writes the draft value into both controls. Only ever called for local edits or
-// for an explicit resync, never from the background refresh while editing.
+// Writes the draft value into the input. Only ever called for local edits or for
+// an explicit resync, never from the background refresh while editing.
 function writePollRateControls(valueMs) {
   const normalized = String(valueMs);
-  if (pollRateSliderElement.value !== normalized) {
-    pollRateSliderElement.value = normalized;
-  }
   if (pollRateInputElement.value !== normalized) {
     pollRateInputElement.value = normalized;
   }
@@ -251,6 +247,7 @@ function renderGame(game) {
   document.getElementById("game-winner").textContent = game.winner ? prettyPlayer(game.winner) : "-";
 
   const legalMoves = new Set(game.legal_moves.map((move) => `${move.row}:${move.col}`));
+  const lastMoveKey = game.last_move ? `${game.last_move.row}:${game.last_move.col}` : null;
   const currentSide = game.current_player === "B" ? "black" : "white";
   const currentPlayerConfig = game.players && game.players[currentSide];
   const isHumanTurn = game.status === "active" && currentPlayerConfig && currentPlayerConfig.type === "human";
@@ -270,6 +267,10 @@ function renderGame(game) {
       const isLegal = legalMoves.has(key) && game.status === "active";
       if (isLegal) {
         button.classList.add("legal");
+      }
+      if (key === lastMoveKey) {
+        button.classList.add("last-move");
+        button.title = `${button.title} · latest move`;
       }
 
       if (cell !== ".") {
@@ -377,7 +378,7 @@ async function spawnBots(event) {
 function handlePollRateInput(event) {
   const rawValue = event.target.value;
   // Allow a temporarily empty or half-typed number box without fighting the user.
-  if (event.target === pollRateInputElement && rawValue.trim() === "") {
+  if (rawValue.trim() === "") {
     state.pollRateDirty = true;
     state.draftPollRateMs = null;
     savePollRateButton.disabled = true;
@@ -390,15 +391,9 @@ function handlePollRateInput(event) {
     return;
   }
 
+  // Never write back into the box while it is being typed into.
   state.pollRateDirty = true;
   state.draftPollRateMs = value;
-  // Mirror the slider into the number box (and vice versa) without clobbering
-  // the control currently being typed into.
-  if (event.target === pollRateSliderElement) {
-    pollRateInputElement.value = String(value);
-  } else {
-    pollRateSliderElement.value = String(value);
-  }
   renderPollRateStatus();
 }
 
@@ -454,8 +449,31 @@ async function savePollRate() {
   }
 }
 
+function formatIdleSeconds(seconds) {
+  if (typeof seconds !== "number" || !isFinite(seconds)) {
+    return "unknown";
+  }
+  if (seconds < 1) {
+    return "just now";
+  }
+  if (seconds < 60) {
+    return `${Math.floor(seconds)}s ago`;
+  }
+  if (seconds < 3600) {
+    return `${Math.floor(seconds / 60)}m ago`;
+  }
+  return `${Math.floor(seconds / 3600)}h ago`;
+}
+
 function renderBots(bots) {
   botListElement.innerHTML = "";
+  const staleCount = bots.filter((bot) => bot.stale).length;
+  const liveCount = bots.length - staleCount;
+  botCountElement.textContent = staleCount
+    ? `${liveCount} of ${bots.length} responding · ${staleCount} silent`
+    : `${bots.length} connected`;
+  botCountElement.classList.toggle("has-stale", staleCount > 0);
+
   if (!bots.length) {
     const empty = document.createElement("li");
     empty.textContent = "No bots connected yet.";
@@ -465,15 +483,20 @@ function renderBots(bots) {
 
   bots.forEach((bot) => {
     const item = document.createElement("li");
-    item.className = "bot-row";
+    item.className = `bot-row${bot.stale ? " stale-bot" : ""}`;
 
     const details = document.createElement("div");
     details.className = "bot-row-details";
     const managedLabel = bot.managed ? ` · local pid ${bot.pid}` : "";
+    const lastSeenClock = bot.last_seen_at ? new Date(bot.last_seen_at).toLocaleTimeString() : "never";
+    const idleLabel = formatIdleSeconds(bot.seconds_since_last_seen);
+    const staleBadge = bot.stale
+      ? `<span class="stale-badge">Silent for ${idleLabel.replace(" ago", "")}</span>`
+      : "";
     details.innerHTML = `
-      <strong>${bot.name}</strong>
+      <strong>${bot.name}</strong>${staleBadge}
       <span class="muted">${bot.bot_id}</span>
-      <span class="muted">last seen ${new Date(bot.last_seen_at).toLocaleTimeString()}${managedLabel}</span>
+      <span class="muted">last seen ${lastSeenClock} · ${idleLabel}${managedLabel}</span>
     `;
 
     const removeButton = document.createElement("button");
@@ -512,12 +535,16 @@ function createMiniBoard(match) {
   const board = document.createElement("div");
   board.className = "mini-board";
   const legalMoves = new Set((match.legal_moves || []).map((move) => `${move.row}:${move.col}`));
+  const lastMoveKey = match.last_move ? `${match.last_move.row}:${match.last_move.col}` : null;
   match.board.forEach((row, rowIndex) => {
     row.forEach((cell, colIndex) => {
       const square = document.createElement("div");
       square.className = "mini-square";
       if (legalMoves.has(`${rowIndex}:${colIndex}`)) {
         square.classList.add("legal");
+      }
+      if (`${rowIndex}:${colIndex}` === lastMoveKey) {
+        square.classList.add("last-move");
       }
       if (cell !== ".") {
         const piece = document.createElement("span");
@@ -658,6 +685,7 @@ function renderTournament(tournament) {
 
   if (!tournament) {
     tournamentSummaryElement.textContent = "No tournament started yet.";
+    resumeTournamentButton.classList.add("hidden");
     playoffBracketPanelElement.classList.add("hidden");
     playoffWinnerElement.textContent = "Winner will appear here when the final is decided.";
     playoffBracketElement.innerHTML = "";
@@ -672,13 +700,20 @@ function renderTournament(tournament) {
     ? `${tournament.ongoing_match_count} ongoing matches`
     : "No active match.";
   const championLabel = tournament.champion ? `<br>Champion: ${tournament.champion.name}` : "";
+  const pausedLabel = tournament.paused
+    ? `<br><strong class="paused-label">Paused before the ${tournament.paused_before_round_name}.</strong>`
+    : "";
   tournamentSummaryElement.innerHTML = `
     <strong>${tournament.tournament_id}</strong><br>
     Status: ${tournament.status}<br>
     Format: ${prettyTournamentFormat(tournament.format)}<br>
     Progress: ${tournament.completed_match_count}/${tournament.match_count} matches finished<br>
-    ${activeLabel}${championLabel}
+    ${activeLabel}${championLabel}${pausedLabel}
   `;
+  resumeTournamentButton.classList.toggle("hidden", !tournament.paused);
+  if (tournament.paused) {
+    resumeTournamentButton.textContent = `Resume · start the ${tournament.paused_before_round_name}`;
+  }
   renderPlayoffBracket(tournament);
   renderOngoingBoards(tournament);
   renderFocusUi(tournament);
@@ -727,9 +762,10 @@ async function refreshTournamentView() {
 async function startTournament() {
   try {
     const tournamentFormat = tournamentFormatElement.value;
+    const pauseBetweenRounds = tournamentFormat === "single_elimination" && pauseBetweenRoundsElement.checked;
     const tournament = await fetchJson("/api/tournaments", {
       method: "POST",
-      body: JSON.stringify({ tournament_format: tournamentFormat }),
+      body: JSON.stringify({ tournament_format: tournamentFormat, pause_between_rounds: pauseBetweenRounds }),
     });
     renderTournament(tournament);
     await refreshGamesList();
@@ -740,12 +776,41 @@ async function startTournament() {
       await focusGame(firstGameId, { tournamentFocus: true });
     }
     showMessage(
-      `Tournament ${tournament.tournament_id} started as ${prettyTournamentFormat(tournament.format)} with ${tournament.ongoing_match_count} parallel games.`,
+      tournament.paused
+        ? `Tournament ${tournament.tournament_id} started as ${prettyTournamentFormat(tournament.format)} and is paused before the ${tournament.paused_before_round_name}.`
+        : `Tournament ${tournament.tournament_id} started as ${prettyTournamentFormat(tournament.format)} with ${tournament.ongoing_match_count} parallel games.`,
       "success",
     );
   } catch (error) {
     showMessage(error.message, "error");
   }
+}
+
+async function resumeTournament() {
+  if (!state.currentTournamentId) {
+    return;
+  }
+  resumeTournamentButton.disabled = true;
+  try {
+    const tournament = await fetchJson(`/api/tournaments/${state.currentTournamentId}/resume`, { method: "POST" });
+    renderTournament(tournament);
+    await refreshGamesList();
+    startTournamentPolling();
+    const firstMatch = tournament.ongoing_matches && tournament.ongoing_matches.length ? tournament.ongoing_matches[0] : null;
+    if (firstMatch) {
+      await focusGame(firstMatch.game_id, { tournamentFocus: true });
+    }
+    showMessage(`Resumed tournament ${tournament.tournament_id} with ${tournament.ongoing_match_count} parallel games.`, "success");
+  } catch (error) {
+    showMessage(error.message, "error");
+  } finally {
+    resumeTournamentButton.disabled = false;
+  }
+}
+
+function syncPauseBetweenRoundsVisibility() {
+  const isPlayoff = tournamentFormatElement.value === "single_elimination";
+  pauseBetweenRoundsControlElement.classList.toggle("hidden", !isPlayoff);
 }
 
 async function pollCurrentGame() {
@@ -820,20 +885,21 @@ document.getElementById("new-game-form").addEventListener("submit", createGame);
 document.getElementById("refresh-games").addEventListener("click", refreshGamesList);
 document.getElementById("refresh-tournament").addEventListener("click", refreshTournamentView);
 document.getElementById("start-tournament").addEventListener("click", startTournament);
+resumeTournamentButton.addEventListener("click", resumeTournament);
+tournamentFormatElement.addEventListener("change", syncPauseBetweenRoundsVisibility);
 document.getElementById("black-type").addEventListener("change", () => toggleRemoteUrl("black"));
 document.getElementById("white-type").addEventListener("change", () => toggleRemoteUrl("white"));
 clearFocusButton.addEventListener("click", clearTournamentFocus);
 spawnBotsFormElement.addEventListener("submit", spawnBots);
-pollRateSliderElement.addEventListener("input", handlePollRateInput);
 pollRateInputElement.addEventListener("input", handlePollRateInput);
 pollRateInputElement.addEventListener("blur", handlePollRateBlur);
 pollRateInputElement.addEventListener("keydown", handlePollRateKeydown);
-pollRateSliderElement.addEventListener("keydown", handlePollRateKeydown);
 savePollRateButton.addEventListener("click", savePollRate);
 resetPollRateButton.addEventListener("click", resetPollRate);
 
 toggleRemoteUrl("black");
 toggleRemoteUrl("white");
+syncPauseBetweenRoundsVisibility();
 resetMainViewport();
 refreshGamesList();
 refreshTournamentView();

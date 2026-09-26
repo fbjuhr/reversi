@@ -117,6 +117,25 @@ button:hover {
   flex: 1 1 220px;
 }
 
+.checkbox-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-direction: row;
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
+}
+
+.checkbox-control input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.paused-label {
+  color: #b54708;
+}
+
 .secondary-button {
   background: #d9e2ec;
   color: #1f2933;
@@ -184,18 +203,13 @@ button:hover {
 
 .poll-rate-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(140px, 0.8fr) auto;
+  grid-template-columns: minmax(140px, 0.8fr) auto;
   gap: 0.75rem;
   align-items: end;
 }
 
-.poll-rate-slider-label,
 .poll-rate-exact-label {
   margin: 0;
-}
-
-.poll-rate-slider-label input {
-  padding-inline: 0;
 }
 
 .poll-rate-actions {
@@ -378,6 +392,10 @@ button:hover {
   position: absolute;
 }
 
+.mini-square.last-move {
+  box-shadow: inset 0 0 0 2px #e23b3b;
+}
+
 .mini-square .piece {
   width: 68%;
   aspect-ratio: 1 / 1;
@@ -409,6 +427,43 @@ button:hover {
 .bot-row-details {
   display: grid;
   gap: 0.15rem;
+}
+
+.bot-row.stale-bot {
+  background: #fff1f0;
+  border-color: #e23b3b;
+}
+
+.bot-row.stale-bot .bot-row-details strong {
+  color: #b42318;
+}
+
+.stale-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: #e23b3b;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.bot-count {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #d9e2ec;
+  color: #1f2933;
+  font-size: 0.78rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.bot-count.has-stale {
+  background: #e23b3b;
+  color: #fff;
 }
 
 .tournament-grid {
@@ -482,6 +537,17 @@ button:hover {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.45);
   position: absolute;
+}
+
+.square.last-move {
+  box-shadow: inset 0 0 0 3px #e23b3b;
+}
+
+/* Ring the checker itself so the latest move stays readable on a busy board. */
+.square.last-move .piece,
+.mini-square.last-move .piece {
+  outline: 2px solid #e23b3b;
+  outline-offset: 1px;
 }
 
 .piece {

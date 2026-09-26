@@ -927,6 +927,7 @@ def create_app(*, operator_password: str | None = None) -> Flask:
                 double_round_robin=(
                     bool(payload.get("double_round_robin")) if "double_round_robin" in payload else None
                 ),
+                pause_between_rounds=bool(payload.get("pause_between_rounds", False)),
             )
         except KeyError as exc:
             return {"error": str(exc)}, 404
@@ -942,6 +943,16 @@ def create_app(*, operator_password: str | None = None) -> Flask:
             tournament = tournament_manager.get_tournament(tournament_id)
         except KeyError as exc:
             return {"error": str(exc)}, 404
+        return {**tournament, "supported_formats": list(SUPPORTED_TOURNAMENT_FORMATS)}, 200
+
+    @app.post("/api/tournaments/<tournament_id>/resume")
+    def resume_tournament(tournament_id: str) -> tuple[dict[str, object], int]:
+        try:
+            tournament = tournament_manager.resume_tournament(tournament_id)
+        except KeyError as exc:
+            return {"error": str(exc)}, 404
+        except RuntimeError as exc:
+            return {"error": str(exc)}, 409
         return {**tournament, "supported_formats": list(SUPPORTED_TOURNAMENT_FORMATS)}, 200
 
     @app.post("/api/tournament/matches/<game_id>/move")

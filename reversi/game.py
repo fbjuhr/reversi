@@ -151,6 +151,14 @@ class ReversiGame:
             self.winner = "draw"
         self.termination_reason = "no_legal_moves"
 
+    def last_move(self) -> dict[str, object] | None:
+        """Return the most recent actual move, ignoring passes and forfeits."""
+        for entry in reversed(self.move_history):
+            move = entry.get("move")
+            if move:
+                return {"row": move["row"], "col": move["col"], "player": entry["player"]}
+        return None
+
     def to_dict(self, game_id: str | None = None) -> dict[str, object]:
         scores = self.counts()
         legal = self.legal_moves()
@@ -164,6 +172,7 @@ class ReversiGame:
             "legal_moves": [move.to_dict() for move in legal],
             "move_count": len(self.move_history),
             "history": self.move_history,
+            "last_move": self.last_move(),
         }
         if game_id is not None:
             payload["game_id"] = game_id
